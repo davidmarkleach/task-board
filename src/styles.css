@@ -125,3 +125,16 @@ input, textarea, select { font: inherit; color: #b6c2cf; }
   .brand { display: none; }
   .modal { padding: 16px; }
 }
+
+/* ---------- team modal ---------- */
+.modal-heading { margin: 0 0 16px; font-size: 20px; color: #dee4ea; }
+.invite-form, .link-row { display: flex; gap: 8px; }
+.invite-form input, .link-row input { flex: 1; min-width: 0; background: #22272b; border: 1px solid #454f59; border-radius: 4px; padding: 7px 10px; }
+.new-link { background: #1c2b41; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.new-link p { margin: 0 0 8px; }
+.team-list { list-style: none; padding: 0; margin: 8px 0 20px; }
+.team-list li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #454f59; flex-wrap: wrap; }
+.team-who { flex: 1; min-width: 160px; }
+.tag { font-size: 11px; background: #1c2b41; color: #85b8ff; border-radius: 3px; padding: 1px 6px; margin-left: 4px; }
+.danger-link { color: #fd9891; }
+.section-label { margin-top: 18px; }

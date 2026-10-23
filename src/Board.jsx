@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
-import { supabase } from './supabase'
+import { api } from './api'
 import { LIST_COLORS, positionAt, formatDue, dueStatus } from './util'
 import Avatar from './Avatar'
 import CardModal from './CardModal'
+import TeamModal from './TeamModal'
 
-export default function Board({ session }) {
+export default function Board({ user, onUserChange, onLogout }) {
   const [lists, setLists] = useState([])
   const [cards, setCards] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -13,44 +14,38 @@ export default function Board({ session }) {
   const [openCardId, setOpenCardId] = useState(null)
   const [query, setQuery] = useState('')
   const [userMenu, setUserMenu] = useState(false)
+  const [teamOpen, setTeamOpen] = useState(false)
   const reloadTimer = useRef(null)
 
   const load = useCallback(async () => {
-    const [l, c, p] = await Promise.all([
-      supabase.from('lists').select('*').order('position'),
-      supabase.from('cards').select('*').order('position'),
-      supabase.from('profiles').select('*').order('full_name'),
-    ])
-    const err = l.error || c.error || p.error
-    if (err) console.error(err)
-    else {
-      setLists(l.data)
-      setCards(c.data)
-      setProfiles(p.data)
+    try {
+      const data = await api.get('/api/board')
+      setLists(data.lists)
+      setCards(data.cards)
+      setProfiles(data.profiles)
+    } catch (err) {
+      if (err.status === 401) return onLogout()
+      console.error(err)
     }
     setLoading(false)
-  }, [])
+  }, [onLogout])
 
   useEffect(() => {
     load()
-    const scheduleReload = () => {
+    // The server pings this stream whenever anyone changes the board.
+    const events = new EventSource('/api/events')
+    events.onmessage = () => {
       clearTimeout(reloadTimer.current)
       reloadTimer.current = setTimeout(load, 250)
     }
-    const channel = supabase
-      .channel('board')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lists' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cards' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, scheduleReload)
-      .subscribe()
     return () => {
       clearTimeout(reloadTimer.current)
-      supabase.removeChannel(channel)
+      events.close()
     }
   }, [load])
 
   const profileById = useMemo(() => Object.fromEntries(profiles.map((p) => [p.id, p])), [profiles])
-  const me = profileById[session.user.id]
+  const me = profileById[user.id] || user
 
   const cardsByList = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -64,51 +59,44 @@ export default function Board({ session }) {
     return out
   }, [lists, cards, query])
 
-  async function run(promise) {
-    const { error } = await promise
-    if (error) {
-      alert(error.message)
+  function run(promise) {
+    return promise.catch((err) => {
+      alert(err.message)
       load()
-    }
+    })
   }
 
   // ---------- mutations (optimistic, then saved) ----------
   function updateCard(id, patch) {
     setCards((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
-    run(supabase.from('cards').update(patch).eq('id', id))
+    run(api.patch(`/api/cards/${id}`, patch))
   }
   function deleteCard(id) {
     setCards((cs) => cs.filter((c) => c.id !== id))
     setOpenCardId(null)
-    run(supabase.from('cards').delete().eq('id', id))
+    run(api.del(`/api/cards/${id}`))
   }
   async function addCard(listId, title) {
     const siblings = cards.filter((c) => c.list_id === listId)
     const position = siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 1
-    const { data, error } = await supabase
-      .from('cards')
-      .insert({ list_id: listId, title, position })
-      .select()
-      .single()
-    if (error) return alert(error.message)
-    setCards((cs) => (cs.some((c) => c.id === data.id) ? cs : [...cs, data]))
+    const card = await run(api.post('/api/cards', { list_id: listId, title, position }))
+    if (card) setCards((cs) => (cs.some((c) => c.id === card.id) ? cs : [...cs, card]))
   }
   function updateList(id, patch) {
     setLists((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
-    run(supabase.from('lists').update(patch).eq('id', id))
+    run(api.patch(`/api/lists/${id}`, patch))
   }
   function deleteList(id) {
     const n = cards.filter((c) => c.list_id === id).length
     if (!confirm(`Delete this list${n ? ` and its ${n} card${n === 1 ? '' : 's'}` : ''}? This can't be undone.`)) return
     setLists((ls) => ls.filter((l) => l.id !== id))
     setCards((cs) => cs.filter((c) => c.list_id !== id))
-    run(supabase.from('lists').delete().eq('id', id))
+    run(api.del(`/api/lists/${id}`))
   }
   async function addList(title) {
     const position = lists.length ? Math.max(...lists.map((l) => l.position)) + 1 : 1
-    const { data, error } = await supabase.from('lists').insert({ title, position }).select().single()
-    if (error) return alert(error.message)
-    setLists((ls) => (ls.some((l) => l.id === data.id) ? ls : [...ls, data]))
+    const list = await run(api.post('/api/lists', { title, position }))
+    if (list) setLists((ls) => (ls.some((l) => l.id === list.id) ? ls : [...ls, list]))
   }
 
   function onDragEnd({ source, destination, draggableId, type }) {
@@ -118,7 +106,7 @@ export default function Board({ session }) {
       const others = lists.filter((l) => l.id !== draggableId)
       const position = positionAt(others, destination.index)
       setLists((ls) => ls.map((l) => (l.id === draggableId ? { ...l, position } : l)).sort((a, b) => a.position - b.position))
-      run(supabase.from('lists').update({ position }).eq('id', draggableId))
+      run(api.patch(`/api/lists/${draggableId}`, { position }))
     } else {
       const others = (cardsByList[destination.droppableId] || []).filter((c) => c.id !== draggableId)
       const position = positionAt(others, destination.index)
@@ -127,10 +115,22 @@ export default function Board({ session }) {
   }
 
   async function renameMe() {
-    const name = prompt('Your display name', me?.full_name || '')
+    const name = prompt('Your display name', me.full_name || '')
     if (!name?.trim()) return
-    await supabase.from('profiles').update({ full_name: name.trim() }).eq('id', session.user.id)
+    await run(api.patch('/api/me', { full_name: name.trim() }))
+    onUserChange()
     load()
+  }
+
+  async function changePassword() {
+    const password = prompt('New password (8+ characters)')
+    if (!password) return
+    await run(api.patch('/api/me', { password }))
+  }
+
+  async function logout() {
+    await api.post('/api/logout').catch(() => {})
+    onLogout()
   }
 
   const openCard = cards.find((c) => c.id === openCardId)
@@ -143,15 +143,17 @@ export default function Board({ session }) {
         <input className="search" placeholder="Search cards" value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="topbar-right">
           <button className="avatar-btn" onClick={() => setUserMenu((v) => !v)}>
-            <Avatar profile={me || { id: session.user.id, full_name: session.user.email }} size={28} />
+            <Avatar profile={me} size={28} />
           </button>
           {userMenu && (
             <>
               <div className="backdrop" onClick={() => setUserMenu(false)} />
               <div className="popover user-menu">
-                <div className="popover-title">{me?.full_name}<br /><span className="muted">{session.user.email}</span></div>
+                <div className="popover-title">{me.full_name}<br /><span className="muted">{user.email}</span></div>
+                {user.is_admin && <button onClick={() => { setUserMenu(false); setTeamOpen(true) }}>Team &amp; invites</button>}
                 <button onClick={() => { setUserMenu(false); renameMe() }}>Change display name</button>
-                <button onClick={() => supabase.auth.signOut()}>Log out</button>
+                <button onClick={() => { setUserMenu(false); changePassword() }}>Change password</button>
+                <button onClick={logout}>Log out</button>
               </div>
             </>
           )}
@@ -196,6 +198,8 @@ export default function Board({ session }) {
         </DragDropContext>
       )}
 
+      {teamOpen && <TeamModal currentUser={user} onClose={() => setTeamOpen(false)} />}
+
       {openCard && (
         <CardModal
           card={openCard}
@@ -204,6 +208,11 @@ export default function Board({ session }) {
           profileById={profileById}
           onClose={() => setOpenCardId(null)}
           onUpdate={(patch) => updateCard(openCard.id, patch)}
+          onMove={(listId) => {
+            const siblings = cards.filter((c) => c.list_id === listId && c.id !== openCard.id)
+            const position = siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 1
+            updateCard(openCard.id, { list_id: listId, position })
+          }}
           onDelete={() => deleteCard(openCard.id)}
         />
       )}

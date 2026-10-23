@@ -1,39 +1,26 @@
-import { useEffect, useState } from 'react'
-import { supabase, isConfigured, authLinkType } from './supabase'
-import Login, { SetPassword } from './Login'
+import { useCallback, useEffect, useState } from 'react'
+import { api } from './api'
+import Login, { AcceptInvite } from './Login'
 import Board from './Board'
 
-export default function App() {
-  const [session, setSession] = useState(undefined)
-  const [needsPassword, setNeedsPassword] = useState(
-    authLinkType === 'invite' || authLinkType === 'recovery'
-  )
+const inviteToken = window.location.pathname.match(/^\/invite\/([\w-]+)/)?.[1]
 
-  useEffect(() => {
-    if (!isConfigured) return
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
-      if (event === 'PASSWORD_RECOVERY') setNeedsPassword(true)
-      setSession(s)
-    })
-    return () => sub.subscription.unsubscribe()
+export default function App() {
+  const [user, setUser] = useState(undefined)
+
+  const refreshUser = useCallback(() => {
+    api.get('/api/me').then(setUser).catch(() => setUser(null))
   }, [])
 
-  if (!isConfigured) {
-    return (
-      <div className="auth-screen">
-        <div className="auth-box">
-          <h1>Almost there</h1>
-          <p>
-            Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your
-            environment (see README), then rebuild.
-          </p>
-        </div>
-      </div>
-    )
+  useEffect(refreshUser, [refreshUser])
+
+  function onLoggedIn() {
+    window.history.replaceState(null, '', '/')
+    refreshUser()
   }
-  if (session === undefined) return <div className="auth-screen" />
-  if (!session) return <Login />
-  if (needsPassword) return <SetPassword session={session} onDone={() => setNeedsPassword(false)} />
-  return <Board session={session} />
+
+  if (inviteToken && window.location.pathname !== '/') return <AcceptInvite token={inviteToken} onDone={onLoggedIn} />
+  if (user === undefined) return <div className="auth-screen" />
+  if (!user) return <Login onDone={onLoggedIn} />
+  return <Board user={user} onUserChange={refreshUser} onLogout={() => setUser(null)} />
 }

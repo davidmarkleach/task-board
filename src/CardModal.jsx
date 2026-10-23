@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Avatar from './Avatar'
 
-export default function CardModal({ card, lists, profiles, profileById, onClose, onUpdate, onDelete }) {
+export default function CardModal({ card, lists, profiles, profileById, onClose, onUpdate, onMove, onDelete }) {
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
 
@@ -51,7 +51,7 @@ export default function CardModal({ card, lists, profiles, profileById, onClose,
         <div className="fields">
           <label>
             <span>List</span>
-            <select value={card.list_id} onChange={(e) => onUpdate({ list_id: e.target.value, position: Date.now() / 1e6 })}>
+            <select value={card.list_id} onChange={(e) => onMove(e.target.value)}>
               {lists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
             </select>
           </label>
