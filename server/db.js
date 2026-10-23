@@ -15,8 +15,6 @@ export const pool = new pg.Pool({
 export const query = (text, params) => pool.query(text, params)
 
 const SCHEMA = `
-create extension if not exists pgcrypto;
-
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
