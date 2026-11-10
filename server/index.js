@@ -147,7 +147,7 @@ app.get('/api/events', (req, res) => {
 app.get('/api/board', ah(async (req, res) => {
   const [lists, cards, users] = await Promise.all([
     query(`select * from lists order by position`),
-    query(`select * from cards order by position`),
+    query(`select * from cards where not archived order by position`),
     query(`select id, full_name from users order by full_name`),
   ])
   res.json({ lists: lists.rows, cards: cards.rows, profiles: users.rows })
@@ -168,7 +168,7 @@ async function updateRow(table, id, patch, extra = '') {
 }
 
 const LIST_FIELDS = ['title', 'color', 'position', 'collapsed']
-const CARD_FIELDS = ['list_id', 'title', 'description', 'due_date', 'completed', 'position', 'assignee']
+const CARD_FIELDS = ['list_id', 'title', 'description', 'due_date', 'completed', 'position', 'assignee', 'archived']
 
 app.post('/api/lists', ah(async (req, res) => {
   const { title, position = 0 } = req.body
@@ -188,6 +188,14 @@ app.delete('/api/lists/:id', ah(async (req, res) => {
   await query(`delete from lists where id = $1`, [req.params.id])
   broadcast()
   res.json({ ok: true })
+}))
+
+app.get('/api/cards/archived', ah(async (req, res) => {
+  const { rows } = await query(
+    `select c.*, l.title as list_title from cards c join lists l on l.id = c.list_id
+     where c.archived order by c.updated_at desc`
+  )
+  res.json(rows)
 }))
 
 app.post('/api/cards', ah(async (req, res) => {

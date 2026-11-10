@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Avatar from './Avatar'
 
-export default function CardModal({ card, lists, profiles, profileById, onClose, onUpdate, onMove, onDelete }) {
+export default function CardModal({ card, lists, profiles, profileById, onClose, onUpdate, onMove, onArchive, onDelete }) {
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
 
@@ -88,7 +88,10 @@ export default function CardModal({ card, lists, profiles, profileById, onClose,
             {creator ? `Created by ${creator.full_name} · ` : ''}
             {new Date(card.created_at).toLocaleDateString()}
           </span>
-          <button className="btn danger" onClick={() => confirm('Delete this card?') && onDelete()}>Delete card</button>
+          <div className="footer-actions">
+            <button className="btn" onClick={onArchive} title="Shortcut: hover a card and press C">Archive</button>
+            <button className="btn danger" onClick={() => confirm('Delete this card?') && onDelete()}>Delete card</button>
+          </div>
         </div>
       </div>
     </div>

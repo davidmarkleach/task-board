@@ -61,6 +61,7 @@ create table if not exists cards (
   updated_at timestamptz not null default now()
 );
 create index if not exists cards_list_id_idx on cards (list_id);
+alter table cards add column if not exists archived boolean not null default false;
 
 create table if not exists meta (key text primary key, value text);
 `

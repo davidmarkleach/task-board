@@ -5,6 +5,7 @@ import { LIST_COLORS, positionAt, formatDue, dueStatus } from './util'
 import Avatar from './Avatar'
 import CardModal from './CardModal'
 import TeamModal from './TeamModal'
+import ArchiveModal from './ArchiveModal'
 
 export default function Board({ user, onUserChange, onLogout }) {
   const [lists, setLists] = useState([])
@@ -15,7 +16,11 @@ export default function Board({ user, onUserChange, onLogout }) {
   const [query, setQuery] = useState('')
   const [userMenu, setUserMenu] = useState(false)
   const [teamOpen, setTeamOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [toast, setToast] = useState(null)
   const reloadTimer = useRef(null)
+  const toastTimer = useRef(null)
+  const hoveredCardId = useRef(null)
 
   const load = useCallback(async () => {
     try {
@@ -71,6 +76,42 @@ export default function Board({ user, onUserChange, onLogout }) {
     setCards((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
     run(api.patch(`/api/cards/${id}`, patch))
   }
+  function archiveCard(id) {
+    const card = cards.find((c) => c.id === id)
+    if (!card) return
+    if (hoveredCardId.current === id) hoveredCardId.current = null
+    setCards((cs) => cs.filter((c) => c.id !== id))
+    setOpenCardId(null)
+    run(api.patch(`/api/cards/${id}`, { archived: true }))
+    clearTimeout(toastTimer.current)
+    setToast({ card })
+    toastTimer.current = setTimeout(() => setToast(null), 6000)
+  }
+  function restoreCard(card) {
+    setCards((cs) => (cs.some((c) => c.id === card.id) ? cs : [...cs, { ...card, archived: false }]))
+    return run(api.patch(`/api/cards/${card.id}`, { archived: false }))
+  }
+  function undoArchive() {
+    clearTimeout(toastTimer.current)
+    restoreCard(toast.card)
+    setToast(null)
+  }
+
+  // Trello-style shortcut: hover over a card and press C to archive it.
+  const modalOpen = Boolean(openCardId || teamOpen || archiveOpen)
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key.toLowerCase() !== 'c' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
+      if (modalOpen || !hoveredCardId.current) return
+      const el = document.activeElement
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
+      e.preventDefault()
+      archiveCard(hoveredCardId.current)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
   function deleteCard(id) {
     setCards((cs) => cs.filter((c) => c.id !== id))
     setOpenCardId(null)
@@ -153,6 +194,7 @@ export default function Board({ user, onUserChange, onLogout }) {
                 {user.is_admin && <button onClick={() => { setUserMenu(false); setTeamOpen(true) }}>Team &amp; invites</button>}
                 <button onClick={() => { setUserMenu(false); renameMe() }}>Change display name</button>
                 <button onClick={() => { setUserMenu(false); changePassword() }}>Change password</button>
+                <button onClick={() => { setUserMenu(false); setArchiveOpen(true) }}>Archived cards</button>
                 <button onClick={logout}>Log out</button>
               </div>
             </>
@@ -185,6 +227,7 @@ export default function Board({ user, onUserChange, onLogout }) {
                     dragDisabled={filtering}
                     onOpenCard={setOpenCardId}
                     onToggleCard={(c) => updateCard(c.id, { completed: !c.completed })}
+                    onHoverCard={(id) => { hoveredCardId.current = id }}
                     onAddCard={addCard}
                     onUpdate={(patch) => updateList(list.id, patch)}
                     onDelete={() => deleteList(list.id)}
@@ -200,6 +243,14 @@ export default function Board({ user, onUserChange, onLogout }) {
 
       {teamOpen && <TeamModal currentUser={user} onClose={() => setTeamOpen(false)} />}
 
+      {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} onRestore={restoreCard} />}
+
+      {toast && (
+        <div className="toast">
+          Card archived <button className="link" onClick={undoArchive}>Undo</button>
+        </div>
+      )}
+
       {openCard && (
         <CardModal
           card={openCard}
@@ -213,6 +264,7 @@ export default function Board({ user, onUserChange, onLogout }) {
             const position = siblings.length ? Math.max(...siblings.map((c) => c.position)) + 1 : 1
             updateCard(openCard.id, { list_id: listId, position })
           }}
+          onArchive={() => archiveCard(openCard.id)}
           onDelete={() => deleteCard(openCard.id)}
         />
       )}
@@ -220,7 +272,7 @@ export default function Board({ user, onUserChange, onLogout }) {
   )
 }
 
-function List({ list, index, cards, totalCards, profileById, dragDisabled, onOpenCard, onToggleCard, onAddCard, onUpdate, onDelete }) {
+function List({ list, index, cards, totalCards, profileById, dragDisabled, onOpenCard, onToggleCard, onHoverCard, onAddCard, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(list.title)
   const [menu, setMenu] = useState(false)
@@ -306,6 +358,7 @@ function List({ list, index, cards, totalCards, profileById, dragDisabled, onOpe
                         dragDisabled={dragDisabled}
                         onOpen={() => onOpenCard(card.id)}
                         onToggle={() => onToggleCard(card)}
+                        onHover={onHoverCard}
                       />
                     ))}
                     {dropProvided.placeholder}
@@ -331,7 +384,7 @@ function List({ list, index, cards, totalCards, profileById, dragDisabled, onOpe
   )
 }
 
-function CardItem({ card, index, assignee, dragDisabled, onOpen, onToggle }) {
+function CardItem({ card, index, assignee, dragDisabled, onOpen, onToggle, onHover }) {
   const status = dueStatus(card)
   return (
     <Draggable draggableId={card.id} index={index} isDragDisabled={dragDisabled}>
@@ -342,6 +395,8 @@ function CardItem({ card, index, assignee, dragDisabled, onOpen, onToggle }) {
           {...provided.draggableProps}
           {...provided.dragHandleProps}
           onClick={onOpen}
+          onMouseEnter={() => onHover(card.id)}
+          onMouseLeave={() => onHover(null)}
         >
           <div className="card-main">
             <button
